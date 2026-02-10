@@ -62,11 +62,12 @@ else
     echo -e "${GREEN}✓ Virtual environment already exists${NC}"
 fi
 
-# Step 6: Install Python dependencies
+# Step 6: Install Python dependencies with uv
 echo -e "${YELLOW}[6/9] Installing Python dependencies with uv...${NC}"
 chown -R ec2-user:ec2-user "$PROJECT_DIR"
-sudo -u ec2-user "$VENV_DIR/bin/python" -m pip install -q -r requirements.txt
-echo -e "${GREEN}✓ Dependencies installed${NC}"
+cd "$PROJECT_DIR"
+sudo -u ec2-user /home/ec2-user/.local/bin/uv sync --python "$VENV_DIR/bin/python" > /dev/null 2>&1
+echo -e "${GREEN}✓ Dependencies installed with uv${NC}"
 
 # Step 7: Create systemd service
 echo -e "${YELLOW}[7/9] Creating systemd service...${NC}"
