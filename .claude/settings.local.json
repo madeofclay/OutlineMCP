@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(__NEW_LINE_ed460c5e12b57065__ cat /home/ec2-user/repos/OutlineMCP/nginx-location.conf)",
+      "Bash(__NEW_LINE_ed460c5e12b57065__ echo \"\")"
+    ]
+  }
+}
