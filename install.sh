@@ -63,11 +63,12 @@ else
 fi
 
 # Step 6: Install Python dependencies with uv
-echo -e "${YELLOW}[6/9] Installing Python dependencies with uv...${NC}"
+echo -e "${YELLOW}[6/9] Installing Python dependencies with uv sync...${NC}"
 chown -R ec2-user:ec2-user "$PROJECT_DIR"
 cd "$PROJECT_DIR"
+sudo -u ec2-user /home/ec2-user/.local/bin/uv lock > /dev/null 2>&1
 sudo -u ec2-user /home/ec2-user/.local/bin/uv sync --python "$VENV_DIR/bin/python" > /dev/null 2>&1
-echo -e "${GREEN}✓ Dependencies installed with uv${NC}"
+echo -e "${GREEN}✓ Dependencies installed with uv sync${NC}"
 
 # Step 7: Create systemd service
 echo -e "${YELLOW}[7/9] Creating systemd service...${NC}"
