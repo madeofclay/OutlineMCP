@@ -95,131 +95,86 @@ systemctl daemon-reload
 systemctl enable mcp-proxy > /dev/null 2>&1
 echo -e "${GREEN}✓ Systemd service created and enabled${NC}"
 
-# Step 8: Configure Nginx
-echo -e "${YELLOW}[8/9] Configuring Nginx...${NC}"
-cat > /etc/nginx/conf.d/mcp.conf << 'EOF'
-# Rate limiting zone
-limit_req_zone $binary_remote_addr zone=mcp_limit:10m rate=20r/s;
+# Step 8: Create Nginx configuration template (user must integrate manually)
+echo -e "${YELLOW}[8/9] Creating Nginx configuration template...${NC}"
+cat > /home/ec2-user/repos/OutlineMCP/nginx-location.conf << 'EOF'
+# Add this location block to your existing Nginx server configuration
+# (inside the HTTPS server block for data-dev.clay.cl)
 
-# HTTP redirect to HTTPS
-server {
-    listen 80;
-    listen [::]:80;
-    server_name _;
+location /outline/ {
+    # Proxy to FastAPI Outline MCP proxy
+    proxy_pass http://localhost:8000/;
 
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
+    # Headers
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
+    # WebSocket support (required for MCP)
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
 
-# HTTPS server block
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name DOMAIN_PLACEHOLDER;
-
-    # SSL certificate placeholder (replace with certbot)
-    ssl_certificate /etc/ssl/certs/self-signed.crt;
-    ssl_certificate_key /etc/ssl/private/self-signed.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
-
-    # Rate limiting
-    limit_req zone=mcp_limit burst=40 nodelay;
-
-    # Client timeout for container creation (90 seconds)
-    client_body_timeout 90s;
+    # Timeouts for container creation (90 seconds)
     proxy_connect_timeout 90s;
     proxy_send_timeout 90s;
     proxy_read_timeout 90s;
 
-    # Stats endpoint with basic auth
-    location /stats {
-        auth_basic "Restricted";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-
-        proxy_pass http://localhost:8000/stats;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Health check endpoint (no auth)
-    location /health {
-        proxy_pass http://localhost:8000/health;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Main proxy pass with WebSocket support
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # WebSocket support
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        # Pass through original headers
-        proxy_pass_request_headers on;
-    }
+    # Optional: Enable authentication if needed
+    # auth_basic "Clay Restricted Content";
+    # auth_basic_user_file /etc/nginx/.htpasswd;
 }
+
+# Optional: Add stats endpoint with auth
+# location /outline/stats {
+#     auth_basic "Clay Restricted Content";
+#     auth_basic_user_file /etc/nginx/.htpasswd;
+#
+#     proxy_pass http://localhost:8000/stats;
+#     proxy_set_header Host $host;
+#     proxy_set_header X-Real-IP $remote_addr;
+#     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#     proxy_set_header X-Forwarded-Proto $scheme;
+# }
 EOF
-echo -e "${GREEN}✓ Nginx configured${NC}"
-
-# Step 9: Create self-signed certificate and htpasswd
-echo -e "${YELLOW}[9/9] Creating self-signed SSL certificate and auth file...${NC}"
-
-# Create self-signed certificate
-mkdir -p /etc/ssl/certs /etc/ssl/private
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/ssl/private/self-signed.key \
-    -out /etc/ssl/certs/self-signed.crt \
-    -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" \
-    2>/dev/null || true
-
-# Create htpasswd for basic auth (default: admin / password123)
-htpasswd -bc /etc/nginx/.htpasswd admin password123 2>/dev/null || \
-    echo "admin:$(openssl passwd -apr1 password123)" > /etc/nginx/.htpasswd
-
-chmod 644 /etc/nginx/.htpasswd
-echo -e "${GREEN}✓ SSL certificate and auth file created${NC}"
-
-# Verify Nginx configuration
-nginx -t > /dev/null 2>&1 && systemctl restart nginx || echo -e "${YELLOW}⚠ Warning: Nginx test failed${NC}"
+chmod 644 /home/ec2-user/repos/OutlineMCP/nginx-location.conf
+echo -e "${GREEN}✓ Nginx location template created${NC}"
+echo -e "${YELLOW}  Location: /home/ec2-user/repos/OutlineMCP/nginx-location.conf${NC}"
+echo -e "${YELLOW}  You must manually add this to /etc/nginx/nginx.conf${NC}"
 
 echo -e "\n${GREEN}=== Installation Complete ===${NC}\n"
 echo -e "${YELLOW}Post-installation steps:${NC}"
-echo "1. Configure your domain:"
-echo "   sed -i 's/DOMAIN_PLACEHOLDER/your-domain.com/g' /etc/nginx/conf.d/mcp.conf"
 echo ""
-echo "2. Install SSL certificate with certbot:"
-echo "   sudo certbot --nginx -d your-domain.com"
+echo "1. CONFIGURE NGINX:"
+echo "   ⚠️  IMPORTANT: You MUST manually add the Nginx location block"
+echo "   Location template: /home/ec2-user/repos/OutlineMCP/nginx-location.conf"
 echo ""
-echo "3. Verify installation:"
+echo "   Steps:"
+echo "   a) View the template:"
+echo "      cat /home/ec2-user/repos/OutlineMCP/nginx-location.conf"
+echo ""
+echo "   b) Add this location block to /etc/nginx/nginx.conf"
+echo "      (inside the HTTPS server block for data-dev.clay.cl)"
+echo ""
+echo "   c) Test Nginx configuration:"
+echo "      sudo nginx -t"
+echo ""
+echo "   d) Reload Nginx:"
+echo "      sudo systemctl reload nginx"
+echo ""
+echo "2. Verify installation:"
 echo "   bash verify.sh"
 echo ""
-echo "4. Check service status:"
+echo "3. Check FastAPI proxy:"
 echo "   systemctl status mcp-proxy"
-echo ""
-echo "5. View logs:"
 echo "   journalctl -u mcp-proxy -f"
 echo ""
-echo -e "${YELLOW}Important:${NC}"
-echo "- Update /etc/nginx/.htpasswd with secure credentials:"
-echo "  sudo htpasswd /etc/nginx/.htpasswd admin"
+echo "4. Test the proxy:"
+echo "   curl https://data-dev.clay.cl/outline/health"
 echo ""
-echo "- Ensure Security Groups allow ports 22, 80, 443"
+echo -e "${YELLOW}Note:${NC}"
+echo "- SSL certificate: Already configured with Let's Encrypt"
+echo "- Auth system: Already configured with /etc/nginx/.htpasswd"
+echo "- URL: https://data-dev.clay.cl/outline/"
 echo ""
