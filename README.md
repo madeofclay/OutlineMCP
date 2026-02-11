@@ -34,13 +34,6 @@ claude mcp add --transport http MCPOutline \
 
 Replace `ol_api_YOUR_TOKEN_HERE` with your actual Outline API key (from step 1).
 
-**Example with real API key:**
-```bash
-claude mcp add --transport http MCPOutline \
-  https://data-dev.clay.cl/outline/mcp \
-  --header "X-Outline-API-Key: ol_api_i3bEwWghaMxrE9FV78wNDNrgF3of9cEgJGFwsk"
-```
-
 **What this command does:**
 - `claude mcp add` - Registers a new MCP server with Claude Code
 - `--transport http` - Uses HTTP/HTTPS for communication (MCP streamable-http protocol)
