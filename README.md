@@ -79,6 +79,37 @@ Edit `~/.config/Claude/claude_desktop_config.json`:
 }
 ```
 
+### 3. Option C: Add to Cursor
+
+**For Cursor IDE (manual configuration)**
+
+Edit `~/.cursor/settings/codeium_chat.json` or `~/.config/Cursor/User/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "outline-mcp": {
+      "url": "https://data-dev.clay.cl/outline/mcp",
+      "transport": {
+        "type": "streamableHttp"
+      },
+      "headers": {
+        "X-Outline-API-Key": "ol_api_YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}
+```
+
+**Or using Cursor CLI (if available):**
+```bash
+cursor mcp add --transport http MCPOutline \
+  https://data-dev.clay.cl/outline/mcp \
+  --header "X-Outline-API-Key: ol_api_YOUR_TOKEN_HERE"
+```
+
+After adding the configuration, restart Cursor for changes to take effect.
+
 ### 4. Verify Connection
 
 **For Claude Code CLI:**
@@ -102,8 +133,8 @@ curl -k https://data-dev.clay.cl/outline/health
 # {"status":"healthy","version":"1.0.0"}
 ```
 
-**For Claude Desktop:**
-Restart Claude Desktop to apply the configuration changes. Open a conversation and the Outline MCP should be available.
+**For Claude Desktop or Cursor:**
+Restart the application to apply the configuration changes. Open a conversation and the Outline MCP should be available in the MCP menu.
 
 ## 🏗️ Architecture
 
