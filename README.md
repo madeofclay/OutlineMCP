@@ -83,7 +83,9 @@ Edit `~/.config/Claude/claude_desktop_config.json`:
 
 **For Cursor IDE (manual configuration)**
 
-Edit `~/.cursor/settings/codeium_chat.json` or `~/.config/Cursor/User/settings.json`:
+Cursor uses two configuration options:
+
+**Global Configuration** - Add to `~/.cursor/mcp.json`:
 
 ```json
 {
@@ -101,11 +103,28 @@ Edit `~/.cursor/settings/codeium_chat.json` or `~/.config/Cursor/User/settings.j
 }
 ```
 
-**Or using Cursor CLI (if available):**
+**Project-Level Configuration** - Add to `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "outline-mcp": {
+      "url": "https://data-dev.clay.cl/outline/mcp",
+      "transport": {
+        "type": "streamableHttp"
+      },
+      "headers": {
+        "X-Outline-API-Key": "ol_api_YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}
+```
+
+**Find Your Configuration:**
 ```bash
-cursor mcp add --transport http MCPOutline \
-  https://data-dev.clay.cl/outline/mcp \
-  --header "X-Outline-API-Key: ol_api_YOUR_TOKEN_HERE"
+# Open MCP Settings UI in Cursor
+# Use the command palette: "View: Open MCP Settings"
 ```
 
 After adding the configuration, restart Cursor for changes to take effect.
