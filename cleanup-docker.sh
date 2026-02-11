@@ -12,25 +12,20 @@ echo -e "${BLUE}=== Docker Cleanup and Maintenance ===${NC}\n"
 # Get initial disk usage
 INITIAL_SIZE=$(docker system df --format "{{json .}}" 2>/dev/null | grep -o '"Reclaimable"[^,]*' | cut -d':' -f2 | tr -d ' "B')
 
-echo -e "${YELLOW}[1/3] Removing stopped containers older than 7 days...${NC}"
-# Find and remove stopped MCP containers older than 7 days
-CUTOFF_TIME=$(date -d "7 days ago" +%s 2>/dev/null || date -v-7d +%s)
+echo -e "${YELLOW}[1/3] Removing all stopped MCP containers...${NC}"
+# Find and remove ALL stopped MCP containers (regardless of age)
 REMOVED_COUNT=0
 
 for container in $(docker ps -a --filter "name=mcp-" --filter "status=exited" --quiet 2>/dev/null); do
-    CREATED=$(docker inspect "$container" --format='{{.Created}}' 2>/dev/null | xargs -I {} date -d {} +%s 2>/dev/null || date -d "$(docker inspect "$container" --format='{{.Created}}' 2>/dev/null)" +%s 2>/dev/null)
-
-    if [ -n "$CREATED" ] && [ "$CREATED" -lt "$CUTOFF_TIME" ]; then
-        echo "  Removing: $container"
-        docker rm "$container" 2>/dev/null || true
-        ((REMOVED_COUNT++))
-    fi
+    echo "  Removing: $container"
+    docker rm "$container" 2>/dev/null || true
+    ((REMOVED_COUNT++))
 done
 
 if [ $REMOVED_COUNT -eq 0 ]; then
-    echo -e "${GREEN}  No old stopped containers found${NC}"
+    echo -e "${GREEN}  No stopped containers found${NC}"
 else
-    echo -e "${GREEN}  Removed $REMOVED_COUNT container(s)${NC}"
+    echo -e "${GREEN}  Removed $REMOVED_COUNT stopped container(s)${NC}"
 fi
 
 echo ""
