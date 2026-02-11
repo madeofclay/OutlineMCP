@@ -241,6 +241,7 @@ async def create_or_start_container(api_key: str) -> Tuple[int, str]:
     Returns: (port, container_name)
     """
     api_key_hash = hash_api_key(api_key)
+    container_name = hash_api_key(api_key)  # Deterministic name
 
     # Case 1: Container already tracked in registry
     if api_key_hash in container_registry:
@@ -266,12 +267,66 @@ async def create_or_start_container(api_key: str) -> Tuple[int, str]:
                 # Fall through to create new one
                 del container_registry[api_key_hash]
 
-    # Case 2: Container doesn't exist, create new one
+    # Case 2: Container exists on disk but not in registry (e.g., after proxy restart)
+    if is_container_stopped(container_name):
+        logger.info(f"Found stopped container on disk (not in registry): {container_name}")
+        # Get port from existing container
+        try:
+            client = get_docker_client()
+            container = client.containers.get(container_name)
+            port_bindings = container.ports
+            # Extract port from binding like {'3000/tcp': [{'HostPort': '4000', ...}]}
+            port = int(port_bindings['3000/tcp'][0]['HostPort'])
+
+            # Mark port as allocated
+            allocated_ports.add(port)
+
+            # Restart container
+            if start_existing_container(container_name):
+                container_registry[api_key_hash] = ContainerInfo(
+                    container_name=container_name,
+                    api_key_hash=api_key_hash,
+                    port=port,
+                    last_used=time(),
+                    created_at=time(),
+                    status="running"
+                )
+                logger.info(f"Restarted container from disk: {container_name} on port {port}")
+                await asyncio.sleep(1)
+                return port, container_name
+        except Exception as e:
+            logger.warning(f"Could not reuse existing container: {str(e)}")
+            # Fall through to create new one
+
+    if is_container_running(container_name):
+        logger.info(f"Found running container on disk (not in registry): {container_name}")
+        # Container is somehow running but not in registry, add it back
+        try:
+            client = get_docker_client()
+            container = client.containers.get(container_name)
+            port_bindings = container.ports
+            port = int(port_bindings['3000/tcp'][0]['HostPort'])
+            allocated_ports.add(port)
+
+            container_registry[api_key_hash] = ContainerInfo(
+                container_name=container_name,
+                api_key_hash=api_key_hash,
+                port=port,
+                last_used=time(),
+                created_at=time(),
+                status="running"
+            )
+            logger.info(f"Recovered running container to registry: {container_name} on port {port}")
+            return port, container_name
+        except Exception as e:
+            logger.warning(f"Could not recover running container: {str(e)}")
+
+    # Case 3: Container doesn't exist anywhere, create new one
     logger.info(f"Creating new container for API key hash: {api_key_hash}")
     port = get_next_available_port()
 
-    container_name = create_container(api_key, port)
-    if not container_name:
+    created_name = create_container(api_key, port)
+    if not created_name:
         raise RuntimeError("Failed to create container")
 
     # Wait for container to be ready
@@ -279,7 +334,7 @@ async def create_or_start_container(api_key: str) -> Tuple[int, str]:
 
     # Register in memory
     container_registry[api_key_hash] = ContainerInfo(
-        container_name=container_name,
+        container_name=created_name,
         api_key_hash=api_key_hash,
         port=port,
         last_used=time(),
@@ -287,8 +342,8 @@ async def create_or_start_container(api_key: str) -> Tuple[int, str]:
         status="running"
     )
 
-    logger.info(f"Container ready: {container_name} on port {port}")
-    return port, container_name
+    logger.info(f"Container ready: {created_name} on port {port}")
+    return port, created_name
 
 
 async def proxy_request(
@@ -304,11 +359,19 @@ async def proxy_request(
 
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            # Forward the request with all headers and body
-            request_headers = dict(request.headers)
-            # Remove headers that should be managed by httpx or contain multiple values
-            for header_to_remove in ["Host", "Content-Length"]:
-                request_headers.pop(header_to_remove, None)
+            # Build headers for proxy request
+            # Start with a minimal set of important headers
+            proxy_headers = {}
+
+            # Copy relevant headers from original request
+            headers_to_forward = ["content-type", "authorization", "user-agent"]
+            for header_name in headers_to_forward:
+                if header_name in request.headers:
+                    proxy_headers[header_name] = request.headers[header_name]
+
+            # Set Accept header for MCP streamable-http protocol
+            # The container requires both application/json and text/event-stream
+            proxy_headers["accept"] = "application/json, text/event-stream"
 
             # Read body if present
             body = b""
@@ -318,7 +381,7 @@ async def proxy_request(
             response = await client.request(
                 method=request.method,
                 url=url,
-                headers=request_headers,
+                headers=proxy_headers,
                 content=body,
             )
 
@@ -504,8 +567,8 @@ async def mcp_http_endpoint(
         logger.error(f"Failed to get/create container: {str(e)}")
         raise HTTPException(status_code=503, detail="Container service unavailable")
 
-    # Step 4: Proxy request to container
-    return await proxy_request(port, "", request, x_outline_api_key)
+    # Step 4: Proxy request to container (/mcp endpoint on container)
+    return await proxy_request(port, "mcp", request, x_outline_api_key)
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
