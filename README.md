@@ -83,9 +83,6 @@ Cursor uses two configuration options:
   "mcpServers": {
     "outline-mcp": {
       "url": "https://data-dev.clay.cl/outline/mcp",
-      "transport": {
-        "type": "streamableHttp"
-      },
       "headers": {
         "X-Outline-API-Key": "ol_api_YOUR_TOKEN_HERE"
       }
@@ -101,9 +98,6 @@ Cursor uses two configuration options:
   "mcpServers": {
     "outline-mcp": {
       "url": "https://data-dev.clay.cl/outline/mcp",
-      "transport": {
-        "type": "streamableHttp"
-      },
       "headers": {
         "X-Outline-API-Key": "ol_api_YOUR_TOKEN_HERE"
       }
@@ -151,7 +145,7 @@ Restart the application to apply the configuration changes. Open a conversation 
 ```
 Claude Code (your machine)
     ↓ HTTPS POST
-data-dev.clay.cl:443
+data-dev.clay.cl/outline/mcp
 (Nginx reverse proxy)
     ↓ HTTP
 localhost:8000
@@ -253,8 +247,6 @@ curl -H "X-Outline-API-Key: ol_api_..." https://data-dev.clay.cl/outline/health
 ├── nginx-location.conf     # Nginx configuration
 ├── pyproject.toml          # Python dependencies (uv)
 ├── uv.lock                 # Dependency lock file
-├── QUICK_SETUP.md          # Quick start guide
-└── SOLUTION_SUMMARY.md     # Technical implementation details
 ```
 
 ## 🔍 Monitoring & Diagnostics
