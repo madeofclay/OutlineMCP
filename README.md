@@ -24,6 +24,8 @@ It will look like: `ol_api_i3bEwWghaMxrE9FV78wNDNrgF3of9cEgJGFwsk`
 
 ### 2. Add to Claude Code CLI
 
+**Option A: Using Claude Code CLI (Recommended)**
+
 Run this command on your local machine:
 
 ```bash
@@ -32,9 +34,32 @@ claude mcp add --transport http MCPOutline \
   --header "X-Outline-API-Key: ol_api_YOUR_TOKEN_HERE"
 ```
 
-Replace `ol_api_YOUR_TOKEN_HERE` with your actual API key.
+Replace `ol_api_YOUR_TOKEN_HERE` with your actual Outline API key (from step 1).
 
-### 3. Or Add to Claude Desktop
+**Example with real API key:**
+```bash
+claude mcp add --transport http MCPOutline \
+  https://data-dev.clay.cl/outline/mcp \
+  --header "X-Outline-API-Key: ol_api_i3bEwWghaMxrE9FV78wNDNrgF3of9cEgJGFwsk"
+```
+
+**What this command does:**
+- `claude mcp add` - Registers a new MCP server with Claude Code
+- `--transport http` - Uses HTTP/HTTPS for communication (MCP streamable-http protocol)
+- `MCPOutline` - Name of the server (you'll see this in `claude mcp list`)
+- `https://data-dev.clay.cl/outline/mcp` - URL of the proxy server
+- `--header "X-Outline-API-Key: ..."` - Includes your API key in request headers
+
+**Verify it worked:**
+```bash
+claude mcp list
+```
+
+You should see `MCPOutline` listed as **✓ Connected**.
+
+### 3. Option B: Add to Claude Desktop
+
+**For Claude Desktop (manual configuration)**
 
 Edit `~/.config/Claude/claude_desktop_config.json`:
 
@@ -56,15 +81,29 @@ Edit `~/.config/Claude/claude_desktop_config.json`:
 
 ### 4. Verify Connection
 
+**For Claude Code CLI:**
 ```bash
-# Check if server is healthy
-curl -k https://data-dev.clay.cl/outline/health
-
-# List MCP servers in Claude
+# List registered MCP servers
 claude mcp list
+
+# Should output something like:
+# MCPOutline
+#   ✓ Connected
+#   Type: http
+#   URL: https://data-dev.clay.cl/outline/mcp
 ```
 
-The server should show as **✓ Connected**.
+**Health check (from terminal):**
+```bash
+# Test the proxy server health endpoint
+curl -k https://data-dev.clay.cl/outline/health
+
+# Should return:
+# {"status":"healthy","version":"1.0.0"}
+```
+
+**For Claude Desktop:**
+Restart Claude Desktop to apply the configuration changes. Open a conversation and the Outline MCP should be available.
 
 ## 🏗️ Architecture
 
