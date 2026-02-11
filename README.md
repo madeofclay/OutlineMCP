@@ -20,8 +20,6 @@ A production-ready HTTP MCP (Model Context Protocol) proxy server for [Outline](
 
 Go to https://app.getoutline.com/settings/tokens and create an API key.
 
-It will look like: `ol_api_i3bEwWghaMxrE9FV78wNDNrgF3of9cEgJGFwsk`
-
 ### 2. Add to Claude Code CLI
 
 **Option A: Using Claude Code CLI (Recommended)**
