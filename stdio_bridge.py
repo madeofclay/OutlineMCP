@@ -85,6 +85,12 @@ class MCPStdioHandler:
         request_id = message.get("id")
         params = message.get("params", {})
 
+        # Extract API key from params if provided (for testing/non-persistent connections)
+        if "X-Outline-API-Key" in params:
+            self.api_key = params["X-Outline-API-Key"]
+            # Remove from params so it doesn't get sent to backend
+            params = {k: v for k, v in params.items() if k != "X-Outline-API-Key"}
+
         logger.info(f"Method: {method}, ID: {request_id}")
 
         # Handle initialize

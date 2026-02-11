@@ -100,8 +100,23 @@ def get_next_available_port() -> int:
     """Find next available port for container"""
     global NEXT_PORT, allocated_ports
 
+    # Get ports already in use by Docker containers
+    try:
+        client = get_docker_client()
+        containers = client.containers.list(all=True)
+        used_ports = set()
+        for container in containers:
+            ports = container.ports
+            if ports and '3000/tcp' in ports:
+                port = int(ports['3000/tcp'][0]['HostPort'])
+                used_ports.add(port)
+    except Exception as e:
+        logger.warning(f"Could not get Docker ports: {str(e)}")
+        used_ports = set()
+
+    # Find first available port
     for port in range(NEXT_PORT, MAX_PORT):
-        if port not in allocated_ports:
+        if port not in allocated_ports and port not in used_ports:
             allocated_ports.add(port)
             return port
 
@@ -270,19 +285,58 @@ async def create_or_start_container(api_key: str) -> Tuple[int, str]:
     # Case 2: Container exists on disk but not in registry (e.g., after proxy restart)
     if is_container_stopped(container_name):
         logger.info(f"Found stopped container on disk (not in registry): {container_name}")
-        # Get port from existing container
+        # Try to get port from existing container
         try:
             client = get_docker_client()
             container = client.containers.get(container_name)
             port_bindings = container.ports
+
             # Extract port from binding like {'3000/tcp': [{'HostPort': '4000', ...}]}
-            port = int(port_bindings['3000/tcp'][0]['HostPort'])
+            # Only proceed if ports are correctly bound
+            if port_bindings and '3000/tcp' in port_bindings:
+                port = int(port_bindings['3000/tcp'][0]['HostPort'])
+                # Mark port as allocated
+                allocated_ports.add(port)
 
-            # Mark port as allocated
-            allocated_ports.add(port)
+                # Restart container
+                if start_existing_container(container_name):
+                    container_registry[api_key_hash] = ContainerInfo(
+                        container_name=container_name,
+                        api_key_hash=api_key_hash,
+                        port=port,
+                        last_used=time(),
+                        created_at=time(),
+                        status="running"
+                    )
+                    logger.info(f"Restarted container from disk: {container_name} on port {port}")
+                    await asyncio.sleep(1)
+                    return port, container_name
+            else:
+                logger.warning(f"Container {container_name} exists but has no valid port bindings, removing it")
+                container.remove(force=True)
+        except Exception as e:
+            logger.warning(f"Could not reuse existing container: {str(e)}, removing it")
+            try:
+                client = get_docker_client()
+                container = client.containers.get(container_name)
+                container.remove(force=True)
+            except:
+                pass
+            # Fall through to create new one
 
-            # Restart container
-            if start_existing_container(container_name):
+    if is_container_running(container_name):
+        logger.info(f"Found running container on disk (not in registry): {container_name}")
+        # Container is somehow running but not in registry, try to add it back
+        try:
+            client = get_docker_client()
+            container = client.containers.get(container_name)
+            port_bindings = container.ports
+
+            # Only proceed if ports are correctly bound
+            if port_bindings and '3000/tcp' in port_bindings:
+                port = int(port_bindings['3000/tcp'][0]['HostPort'])
+                allocated_ports.add(port)
+
                 container_registry[api_key_hash] = ContainerInfo(
                     container_name=container_name,
                     api_key_hash=api_key_hash,
@@ -291,33 +345,11 @@ async def create_or_start_container(api_key: str) -> Tuple[int, str]:
                     created_at=time(),
                     status="running"
                 )
-                logger.info(f"Restarted container from disk: {container_name} on port {port}")
-                await asyncio.sleep(1)
+                logger.info(f"Recovered running container to registry: {container_name} on port {port}")
                 return port, container_name
-        except Exception as e:
-            logger.warning(f"Could not reuse existing container: {str(e)}")
-            # Fall through to create new one
-
-    if is_container_running(container_name):
-        logger.info(f"Found running container on disk (not in registry): {container_name}")
-        # Container is somehow running but not in registry, add it back
-        try:
-            client = get_docker_client()
-            container = client.containers.get(container_name)
-            port_bindings = container.ports
-            port = int(port_bindings['3000/tcp'][0]['HostPort'])
-            allocated_ports.add(port)
-
-            container_registry[api_key_hash] = ContainerInfo(
-                container_name=container_name,
-                api_key_hash=api_key_hash,
-                port=port,
-                last_used=time(),
-                created_at=time(),
-                status="running"
-            )
-            logger.info(f"Recovered running container to registry: {container_name} on port {port}")
-            return port, container_name
+            else:
+                logger.warning(f"Container {container_name} is running but has no valid port bindings, stopping it")
+                container.stop()
         except Exception as e:
             logger.warning(f"Could not recover running container: {str(e)}")
 
@@ -395,7 +427,9 @@ async def proxy_request(
         logger.error(f"Timeout proxying request to {url}")
         raise HTTPException(status_code=504, detail="Gateway Timeout")
     except Exception as e:
-        logger.error(f"Error proxying request: {str(e)}")
+        import traceback
+        logger.error(f"Error proxying request to {url}: {type(e).__name__}: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=502, detail="Bad Gateway")
 
 
