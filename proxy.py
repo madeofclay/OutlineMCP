@@ -473,6 +473,39 @@ async def get_stats(authorization: Optional[str] = Header(None)):
     }
 
 
+@app.post("/")
+async def mcp_http_endpoint(
+    request: Request,
+    x_outline_api_key: Optional[str] = Header(None),
+):
+    """
+    MCP HTTP Protocol endpoint
+    Handles JSON-RPC requests from Claude Code or other MCP clients
+    """
+    # Step 1: Validate API key header
+    if not x_outline_api_key:
+        logger.warning("Request missing X-Outline-API-Key header")
+        raise HTTPException(status_code=400, detail="Missing X-Outline-API-Key header")
+
+    # Step 2: Validate against Outline
+    logger.debug(f"Validating API key")
+    is_valid = await validate_outline_key(x_outline_api_key)
+    if not is_valid:
+        logger.warning(f"Invalid API key")
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    # Step 3: Get or create container
+    try:
+        port, container_name = await create_or_start_container(x_outline_api_key)
+        logger.info(f"MCP request routed to {container_name} on port {port}")
+    except Exception as e:
+        logger.error(f"Failed to get/create container: {str(e)}")
+        raise HTTPException(status_code=503, detail="Container service unavailable")
+
+    # Step 4: Proxy request to container
+    return await proxy_request(port, "", request, x_outline_api_key)
+
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def proxy(
     path: str,
@@ -480,7 +513,7 @@ async def proxy(
     x_outline_api_key: Optional[str] = Header(None),
 ):
     """
-    Main proxy endpoint
+    Legacy proxy endpoint
     Routes requests to per-user containers
     """
     # Step 1: Validate API key header
