@@ -14,7 +14,7 @@ from time import time
 import docker
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from contextlib import asynccontextmanager
 import uvicorn
 
@@ -186,13 +186,13 @@ def create_container(api_key: str, port: int) -> Optional[str]:
             environment={
                 "OUTLINE_API_KEY": api_key,
                 "OUTLINE_API_URL": "https://app.getoutline.com",
-                "MCP_TRANSPORT": "httpServer",
+                "MCP_TRANSPORT": "streamable-http",
                 "MCP_HOST": "0.0.0.0",
                 "MCP_PORT": "3000",
             },
             mem_limit=CONTAINER_MEMORY,
             memswap_limit=CONTAINER_MEMORY,
-            cpus=float(CONTAINER_CPU),
+            nano_cpus=int(float(CONTAINER_CPU) * 1e9),
             restart_policy={"Name": "unless-stopped"},
             network_mode="bridge",
         )
@@ -306,7 +306,9 @@ async def proxy_request(
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             # Forward the request with all headers and body
             request_headers = dict(request.headers)
-            request_headers["Host"] = f"localhost:{port}"
+            # Remove headers that should be managed by httpx or contain multiple values
+            for header_to_remove in ["Host", "Content-Length"]:
+                request_headers.pop(header_to_remove, None)
 
             # Read body if present
             body = b""
@@ -513,11 +515,14 @@ async def proxy(
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Custom HTTP exception handler"""
     logger.warning(f"HTTP {exc.status_code}: {exc.detail}")
-    return {
-        "error": exc.detail,
-        "status_code": exc.status_code,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "status_code": exc.status_code,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
 
 
 # ============================================================================
