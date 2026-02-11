@@ -473,6 +473,7 @@ async def get_stats(authorization: Optional[str] = Header(None)):
     }
 
 
+@app.post("/mcp")
 @app.post("/")
 async def mcp_http_endpoint(
     request: Request,
@@ -481,6 +482,7 @@ async def mcp_http_endpoint(
     """
     MCP HTTP Protocol endpoint
     Handles JSON-RPC requests from Claude Code or other MCP clients
+    Both /mcp and / paths are supported
     """
     # Step 1: Validate API key header
     if not x_outline_api_key:
