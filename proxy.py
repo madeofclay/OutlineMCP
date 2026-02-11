@@ -45,12 +45,29 @@ class ContainerInfo:
     def to_dict(self):
         return asdict(self)
 
+
+@dataclass
+class SessionInfo:
+    """MCP HTTP session information"""
+    session_id: str
+    api_key_hash: str
+    created_at: float
+    last_used: float
+
+    def is_expired(self, timeout_seconds: float) -> bool:
+        """Check if session has been idle too long"""
+        return (time() - self.last_used) > timeout_seconds
+
 # ============================================================================
 # GLOBAL STATE
 # ============================================================================
 
 # Container registry: hash -> ContainerInfo
 container_registry: Dict[str, ContainerInfo] = {}
+
+# MCP Session registry: api_key_hash -> SessionInfo
+# Maintains session IDs returned by the MCP server for stateful HTTP MCP protocol
+mcp_sessions: Dict[str, SessionInfo] = {}
 
 # Port allocator
 allocated_ports: set = set()
@@ -65,6 +82,7 @@ docker_client: Optional[docker.DockerClient] = None
 
 # Configuration
 IDLE_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
+MCP_SESSION_TIMEOUT = 60 * 60  # 1 hour - sessions expire after 1 hour of inactivity
 CONTAINER_IMAGE = "ghcr.io/vortiago/mcp-outline:latest"
 CONTAINER_MEMORY = "256m"
 CONTAINER_CPU = "0.3"
@@ -78,6 +96,43 @@ def hash_api_key(api_key: str) -> str:
     """Generate container name from API key (first 12 chars of SHA256)"""
     hash_obj = hashlib.sha256(api_key.encode())
     return f"mcp-{hash_obj.hexdigest()[:12]}"
+
+
+def save_mcp_session(api_key_hash: str, session_id: str) -> None:
+    """Save or update MCP session for API key"""
+    mcp_sessions[api_key_hash] = SessionInfo(
+        session_id=session_id,
+        api_key_hash=api_key_hash,
+        created_at=time(),
+        last_used=time(),
+    )
+    logger.debug(f"Saved MCP session for {api_key_hash}: {session_id}")
+
+
+def get_mcp_session(api_key_hash: str) -> Optional[str]:
+    """Get active MCP session ID for API key, if not expired"""
+    if api_key_hash in mcp_sessions:
+        session_info = mcp_sessions[api_key_hash]
+        if not session_info.is_expired(MCP_SESSION_TIMEOUT):
+            session_info.last_used = time()
+            return session_info.session_id
+        else:
+            # Session expired, remove it
+            del mcp_sessions[api_key_hash]
+            logger.debug(f"Expired MCP session for {api_key_hash}")
+    return None
+
+
+def cleanup_expired_sessions() -> None:
+    """Remove expired sessions"""
+    current_time = time()
+    expired_keys = [
+        key for key, session in mcp_sessions.items()
+        if session.is_expired(MCP_SESSION_TIMEOUT)
+    ]
+    for key in expired_keys:
+        del mcp_sessions[key]
+        logger.info(f"Cleaned up expired MCP session for {key}")
 
 
 async def validate_outline_key(api_key: str) -> bool:
@@ -386,30 +441,40 @@ async def proxy_request(
 ) -> StreamingResponse:
     """
     Proxy HTTP request to the container
+    Handles Server-Sent Events properly for MCP HTTP protocol
+    Implements session pooling to maintain MCP HTTP session state
     """
     url = f"http://localhost:{port}/{path}"
+    api_key_hash = hash_api_key(api_key)
 
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             # Build headers for proxy request
-            # Start with a minimal set of important headers
             proxy_headers = {}
 
-            # Copy relevant headers from original request
-            headers_to_forward = ["content-type", "authorization", "user-agent"]
+            # Copy relevant headers from original request, but be selective
+            headers_to_forward = ["content-type", "user-agent", "cache-control"]
             for header_name in headers_to_forward:
                 if header_name in request.headers:
                     proxy_headers[header_name] = request.headers[header_name]
 
-            # Set Accept header for MCP streamable-http protocol
-            # The container requires both application/json and text/event-stream
+            # Always set Accept header for MCP streamable-http protocol
+            # This ensures proper Server-Sent Events response
             proxy_headers["accept"] = "application/json, text/event-stream"
+
+            # Session Pooling: Add stored session ID if available
+            # This maintains MCP HTTP session state across multiple requests
+            stored_session = get_mcp_session(api_key_hash)
+            if stored_session:
+                proxy_headers["mcp-session-id"] = stored_session
+                logger.debug(f"Using pooled session for {api_key_hash}: {stored_session}")
 
             # Read body if present
             body = b""
             if request.method in ["POST", "PUT", "PATCH"]:
                 body = await request.body()
 
+            # Make the request with streaming enabled
             response = await client.request(
                 method=request.method,
                 url=url,
@@ -417,10 +482,41 @@ async def proxy_request(
                 content=body,
             )
 
+            # Always stream the response for MCP compatibility
+            # This ensures proper handling of Server-Sent Events
+            async def stream_generator():
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    if chunk:
+                        yield chunk
+
+            # Prepare response headers, ensuring proper SSE headers and no duplicates
+            response_headers = {}
+
+            # Copy important headers from backend response
+            # These headers are critical for MCP HTTP protocol
+            headers_to_preserve = [
+                "content-type",
+                "cache-control",
+                "mcp-session-id",
+                "x-accel-buffering",
+                "connection",
+            ]
+
+            for header_name in headers_to_preserve:
+                if header_name in response.headers:
+                    response_headers[header_name] = response.headers[header_name]
+
+            # Session Pooling: Extract and store session ID from response
+            # MCP server returns session ID in response headers for stateful protocol
+            if "mcp-session-id" in response.headers:
+                new_session_id = response.headers["mcp-session-id"]
+                save_mcp_session(api_key_hash, new_session_id)
+                logger.info(f"Pooled new MCP session for {api_key_hash}: {new_session_id}")
+
             return StreamingResponse(
-                iter([response.content]),
+                stream_generator(),
                 status_code=response.status_code,
-                headers=dict(response.headers),
+                headers=response_headers,
             )
 
     except httpx.TimeoutException:
@@ -440,6 +536,7 @@ async def proxy_request(
 async def cleanup_idle_containers():
     """
     Background task: Stop containers idle for > 15 minutes
+    Also cleans up expired MCP sessions
     Runs every 60 seconds
     """
     while True:
@@ -449,6 +546,7 @@ async def cleanup_idle_containers():
             current_time = time()
             idle_keys = []
 
+            # Cleanup idle containers
             for api_key_hash, info in container_registry.items():
                 idle_duration = current_time - info.last_used
                 idle_minutes = idle_duration / 60
@@ -472,6 +570,9 @@ async def cleanup_idle_containers():
             # Update registry
             for key in idle_keys:
                 container_registry[key].status = "stopped"
+
+            # Cleanup expired MCP sessions
+            cleanup_expired_sessions()
 
         except Exception as e:
             logger.error(f"Error in cleanup task: {str(e)}")
@@ -572,6 +673,8 @@ async def get_stats(authorization: Optional[str] = Header(None)):
 
 @app.post("/mcp")
 @app.post("/")
+@app.get("/mcp")
+@app.get("/")
 async def mcp_http_endpoint(
     request: Request,
     x_outline_api_key: Optional[str] = Header(None),
@@ -579,7 +682,7 @@ async def mcp_http_endpoint(
     """
     MCP HTTP Protocol endpoint
     Handles JSON-RPC requests from Claude Code or other MCP clients
-    Both /mcp and / paths are supported
+    Both /mcp and / paths are supported for both GET and POST
     """
     # Step 1: Validate API key header
     if not x_outline_api_key:
