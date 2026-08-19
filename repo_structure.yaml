@@ -1,0 +1,63 @@
+schema_version: "1.0"
+
+identity:
+  name: OutlineMCP
+  description: >
+    Servidor proxy HTTP MCP (Model Context Protocol) para Outline
+    (getoutline.com), corriendo en una instancia EC2 con aislamiento
+    multi-tenant vía contenedores Docker (uno por API key). Expone
+    data-dev.clay.cl/outline/mcp para que Claude Code/Desktop/Cursor
+    consulten Outline vía MCP.
+  team: "clay-data"
+  language: python
+  environments:
+    - prod
+
+infrastructure:
+  runtime: ec2
+  hosting: ec2
+  region: us-east-1
+  iac: none
+  deploy_strategy: >
+    Instalación manual/scriptada (no CI/CD ni Terraform): `sudo bash
+    install.sh` sobre una instancia EC2 (Amazon Linux 2023 o Ubuntu 20.04+,
+    t3.small o mayor) instala Docker, crea un virtualenv con uv, registra
+    el servicio systemd "mcp-proxy" (FastAPI, puerto 8000) y configura
+    Nginx como reverse proxy HTTPS. El repo vive clonado en
+    /home/ec2-user/repos/OutlineMCP en esa instancia.
+  deploy_branch: ~
+
+entrypoints:
+  - type: ec2-http
+    prod:
+      custom_domain: "data-dev.clay.cl/outline/mcp"
+    develop:
+      custom_domain: ~
+
+dependencies:
+  external_apis:
+    - name: outline
+      env_var: ~  # API key de Outline llega por header X-Outline-API-Key desde el cliente, no vive en el servidor
+
+owners:
+  team: "clay-data"
+  contact: ~
+  github_org: madeofclay
+
+agent_notes: |
+  - Arquitectura real (documentada en README):
+    Claude Code/Desktop/Cursor → HTTPS → Nginx (data-dev.clay.cl) →
+    FastAPI proxy con session pooling (localhost:8000, systemd
+    "mcp-proxy") → contenedor Docker aislado por API key
+    (localhost:4000+) → servidor MCP de Outline (localhost:3000).
+  - Multi-tenancy: cada API key de Outline obtiene su propio contenedor
+    Docker; se auto-detienen tras 15 min de inactividad (no se borran) y
+    se reinician en 2-3s ante el siguiente request.
+  - Sin Terraform/CI-CD: el deploy es el script install.sh corrido a mano
+    sobre la instancia EC2. cleanup-docker.sh hace mantenimiento semanal
+    de contenedores. Ver docs/DEPLOYMENT_CHECKLIST.md y
+    docs/NGINX_INTEGRATION.md para el detalle operativo completo.
+  - GAP: no se identificó qué instancia EC2 específica aloja esto ni si
+    comparte host con otro servicio de Clay (ver también clay-agents, que
+    también corre en EC2 vía git-pull-supervisord) — confirmar con el
+    equipo dueño si es la misma instancia u otra dedicada.
